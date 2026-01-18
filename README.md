@@ -1,49 +1,78 @@
+# OpenTimelineIO monorepo: media-pipeline-bridge (gateway-api service)
 
-# OpenTimelineIO media-pipeline-bridge
-A Python-based prototype that bridges editorial timelines (Avid/AAF → OTIO) to finishing systems (Baselight) via a database-driven “shots + renders” workflow.
+A small, production-minded “bridge” between editorial timelines (via **OpenTimelineIO**) and downstream media pipeline tasks (initially: **thumbnail rendering**), using:
 
-This repo is designed to become a practical interoperability layer:
-- **Ingest** editorial sequence metadata into a normalized DB model (projects → cuts → shots)
-- **Query** shot lists from a REST API
-- **Render** artifacts (starting with thumbnails) via an async worker queue (Redis/RQ + FFmpeg)
-- **Persist** render outputs (path + URL) back to the database
+- **FastAPI** for an HTTP “gateway” service
+- **PostgreSQL** for durable timeline + render metadata
+- **Redis + RQ** for background jobs
+- **ffmpeg** (discovered via `imageio_ffmpeg.get_ffmpeg_exe()` to avoid local install pain)
+- **Artifacts-on-disk** (thumbnails, uploaded OTIO, etc.) with stable paths/URLs
 
-> Status: working API + worker prototype; OTIO/AAF ingest → shots in DB; thumbnail renders via FFmpeg; Baselight integration planned.
-
----
-
-## Why this exists
-Post pipelines frequently break at the boundary between:
-- **Editorial**: “timeline semantics” (cuts, track items, source ranges)
-- **Finishing**: “media + conforms + renders”
-
-The goal is a small, composable bridge where the database becomes the source of truth for:
-- shot-level metadata
-- render state (queued/running/succeeded/failed)
-- artifact locations
+This repo is designed as a **monorepo** so the “service” and the “artifacts it generates” can live together in one coherent example project.
 
 ---
 
-## Architecture (current)
-**FastAPI gateway** + **Postgres** + **Redis/RQ worker**:
+## Why this exists (portfolio context)
 
-1. Editorial ingest populates `projects`, `cuts`, `cut_versions`, `shots`
-2. API endpoint requests an artifact render for a `shot_id`
-3. API creates a `renders` row + a `jobs` row, then enqueues an RQ task
-4. Worker runs FFmpeg, writes an artifact under `/artifacts`, updates DB with output path/URL
+Post-production pipelines often need to move between NLEs and finishing systems while also generating “sidecar” media (thumbnails, proxies, QC frames, etc.) and tracking everything in a database. This project demonstrates:
+
+- OTIO-based ingest (NLE → database)
+- A normalized DB schema (cuts → shots → renders/jobs)
+- Async worker execution and status polling
+- A repeatable local dev workflow (server + worker)
+- A path toward multi-machine scaling (multiple workstations/workers sharing DB + Redis + artifacts)
 
 ---
 
-## Quickstart (local dev)
+## High-level workflow
 
-### Prereqs
-- Python 3.11+ (tested with 3.13)
-- PostgreSQL 14+ (tested with Postgres.app / v17)
-- Redis
-- FFmpeg available to the worker (either system install or `imageio-ffmpeg` fallback)
+1. **Ingest / publish** an OTIO file for a cut/version (e.g., exported from Avid/AAF → OTIO).
+2. Server stores the OTIO under `ARTIFACT_ROOT/` and creates DB records (cut version, shots).
+3. Client lists shots for a cut version.
+4. Client requests a **thumbnail render** for a specific shot.
+5. Server creates a `renders` row + `jobs` row and enqueues an RQ job.
+6. Worker runs ffmpeg to generate `thumbnail.jpg` and updates DB with output path/URL.
+7. Client polls `/jobs/{job_id}` until `succeeded`.
 
-### Setup
+---
+
+## Repo layout (typical)
+
+> Your actual paths may differ slightly; adjust to match your repo.
+
+- `services/gateway-api/`
+  - `app/main.py` — FastAPI app (HTTP API)
+  - `app/models.py` — SQLAlchemy models
+  - `app/config.py` — Settings / env vars
+  - `app/tasks.py` — OTIO ingest task(s)
+  - `app/render_tasks.py` — render worker task(s) (thumbnail)
+  - `migrations/` — Alembic migrations
+- `artifacts/`
+  - `cuts/` — stored OTIO uploads
+  - `renders/<render_id>/thumbnail.jpg` — generated thumbnails
+
+---
+
+## Requirements
+
+- Python 3.13+
+- Postgres (local). Recommended: **Postgres.app** (you can run it on port 5433).
+- Redis (local) for RQ
+- ffmpeg: **not required** as a system install if using `imageio-ffmpeg` (recommended)
+
+---
+
+## Local setup
+
+### 1) Create a virtual environment + install deps
+
+From `services/gateway-api/`:
+
 ```bash
 python -m venv .venv
 source .venv/bin/activate
+pip install -U pip
 pip install -r requirements.txt
+
+
+

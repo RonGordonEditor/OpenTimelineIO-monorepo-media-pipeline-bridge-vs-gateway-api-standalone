@@ -6,7 +6,7 @@ A small, production-minded “bridge” between editorial timelines (via **OpenT
 - **PostgreSQL** for durable timeline + render metadata
 - **Redis + RQ** for background jobs
 - **ffmpeg** (discovered via `imageio_ffmpeg.get_ffmpeg_exe()` to avoid local install pain)
-- **Artifacts-on-disk** (thumbnails, uploaded OTIO, etc.) with stable paths/URLs
+- **Artifacts-on-disk** (thumbnails, stored OTIO, etc.) with stable paths/URLs
 
 This repo is designed as a **monorepo** so the “service” and the “artifacts it generates” can live together in one coherent example project.
 
@@ -16,9 +16,9 @@ This repo is designed as a **monorepo** so the “service” and the “artifact
 
 Post-production pipelines often need to move between NLEs and finishing systems while also generating “sidecar” media (thumbnails, proxies, QC frames, etc.) and tracking everything in a database. This project demonstrates:
 
-- OTIO-based ingest (NLE → database)
+- OTIO-based ingest (editorial timeline → database)
 - A normalized DB schema (cuts → shots → renders/jobs)
-- Async worker execution and status polling
+- Async worker execution (RQ) and status polling
 - A repeatable local dev workflow (server + worker)
 - A path toward multi-machine scaling (multiple workstations/workers sharing DB + Redis + artifacts)
 
@@ -26,8 +26,8 @@ Post-production pipelines often need to move between NLEs and finishing systems 
 
 ## High-level workflow
 
-1. **Ingest / publish** an OTIO file for a cut/version (e.g., exported from Avid/AAF → OTIO).
-2. Server stores the OTIO under `ARTIFACT_ROOT/` and creates DB records (cut version, shots).
+1. **Publish** an OTIO file for a cut/version.
+2. Server stores the OTIO under `ARTIFACT_ROOT/` and creates DB records.
 3. Client lists shots for a cut version.
 4. Client requests a **thumbnail render** for a specific shot.
 5. Server creates a `renders` row + `jobs` row and enqueues an RQ job.
@@ -36,29 +36,26 @@ Post-production pipelines often need to move between NLEs and finishing systems 
 
 ---
 
-## Repo layout (typical)
-
-> Your actual paths may differ slightly; adjust to match your repo.
+## Repo layout
 
 - `services/gateway-api/`
-  - `app/main.py` — FastAPI app (HTTP API)
+  - `app/main.py` — FastAPI app
   - `app/models.py` — SQLAlchemy models
   - `app/config.py` — Settings / env vars
-  - `app/tasks.py` — OTIO ingest task(s)
-  - `app/render_tasks.py` — render worker task(s) (thumbnail)
+  - `app/tasks.py` — OTIO ingest worker task(s)
+  - `app/render_tasks.py` — render worker task(s)
   - `migrations/` — Alembic migrations
 - `artifacts/`
-  - `cuts/` — stored OTIO uploads
-  - `renders/<render_id>/thumbnail.jpg` — generated thumbnails
+  - stored OTIO and generated renders (thumbnails)
 
 ---
 
 ## Requirements
 
 - Python 3.13+
-- Postgres (local). Recommended: **Postgres.app** (you can run it on port 5433).
+- Postgres (local). Recommended on macOS: **Postgres.app**
 - Redis (local) for RQ
-- ffmpeg: **not required** as a system install if using `imageio-ffmpeg` (recommended)
+- ffmpeg: **not required** as a system install (we use `imageio-ffmpeg`)
 
 ---
 
@@ -73,6 +70,3 @@ python -m venv .venv
 source .venv/bin/activate
 pip install -U pip
 pip install -r requirements.txt
-
-
-
